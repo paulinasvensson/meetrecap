@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>meetrecap — messy notes to clean summaries</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; background: #fafafa; }
+  h1 { margin-bottom: 4px; }
+  .tagline { color: #666; margin-top: 0; }
+  textarea { width: 100%; min-height: 180px; padding: 10px; font-size: 14px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; }
+  button { background: #2d5cf6; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-size: 14px; cursor: pointer; margin-top: 8px; margin-right: 8px; }
+  button:hover { background: #1d47d6; }
+  button.secondary { background: #444; }
+  .section { background: white; border: 1px solid #e2e2e2; border-radius: 8px; padding: 20px; margin-top: 20px; }
+  .result { background: #f4f6ff; border-radius: 6px; padding: 14px; margin-top: 14px; white-space: pre-wrap; font-size: 14px; }
+  .error { background: #fff3f3; border: 1px solid #f5b7b7; color: #a30000; padding: 14px; border-radius: 6px; margin-top: 14px; }
+  .license-box { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .license-box input { flex: 1; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
+  .badge.free { background: #e2ffe2; color: #197a19; }
+  .badge.pro { background: #ffe9c2; color: #915a00; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  .action-item { border-left: 3px solid #2d5cf6; padding: 8px 10px; margin: 8px 0; background: #f9f9ff; }
+  .meta { font-size: 12px; color: #555; }
+</style>
+</head>
+<body>
+
+<h1>meetrecap</h1>
+<p class="tagline">Paste your messy meeting notes. Get a clean summary — and (with a license) structured action items.</p>
+
+<div class="section">
+  <label><strong>License key</strong> (paid feature)</label>
+  <div class="license-box">
+    <input id="licenseKey" type="text" placeholder="MR-xxxxxxxx-xx" />
+    <button class="secondary" onclick="saveKey()">Save</button>
+  </div>
+  <div class="meta">Demo key for testing this instance: <code>{{ demo_key }}</code></div>
+</div>
+
+<div class="section">
+  <span class="badge free">FREE</span>
+  <h3>Meeting notes</h3>
+  <textarea id="notes" placeholder="e.g.
+so um we talked about the launch date, John will send the deck by friday
+Sarah needs to follow up with legal asap
+next week we should review pricing again
+..."></textarea>
+  <br/>
+  <button onclick="doSummarize()">Clean up summary (free)</button>
+  <button onclick="doExtractActions()">Extract action items (pro)</button>
+
+  <div id="freeResult" class="result" style="display:none;"></div>
+  <div id="proResult" class="result" style="display:none;"></div>
+  <div id="errorBox" class="error" style="display:none;"></div>
+</div>
+
+<script>
+  const keyInput = document.getElementById('licenseKey');
+  keyInput.value = localStorage.getItem('meetrecap_license') || '';
+
+  function saveKey() {
+    localStorage.setItem('meetrecap_license', keyInput.value.trim());
+    alert('License key saved.');
+  }
+
+  function showError(msg) {
+    const box = document.getElementById('errorBox');
+    box.style.display = 'block';
+    box.textContent = msg;
+  }
+
+  function clearBoxes() {
+    document.getElementById('errorBox').style.display = 'none';
+    document.getElementById('freeResult').style.display = 'none';
+    document.getElementById('proResult').style.display = 'none';
+  }
+
+  async function doSummarize() {
+    clearBoxes();
+    const notes = document.getElementById('notes').value;
+    if (!notes.trim()) { showError('Paste some meeting notes first.'); return; }
+
+    const res = await fetch('/api/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes })
+    });
+    const data = await res.json();
+    if (!res.ok) { showError(data.detail || 'Something went wrong.'); return; }
+
+    let html = '<span class="badge free">FREE SUMMARY</span>\n\n';
+    html += data.summary.map(s => '• ' + s).join('\n');
+    if (data.truncated) {
+      html += `\n\n(Showing 6 of ${data.total_lines_found} points — upgrade to Pro for full extraction with owners, due dates & priorities.)`;
+    }
+    html += '\n\nKey topics: ' + data.key_topics.join(', ');
+
+    const box = document.getElementById('freeResult');
+    box.style.display = 'block';
+    box.textContent = html;
+  }
+
+  async function doExtractActions() {
+    clearBoxes();
+    const notes = document.getElementById('notes').value;
+    if (!notes.trim()) { showError('Paste some meeting notes first.'); return; }
+    const license = localStorage.getItem('meetrecap_license') || '';
+
+    const res = await fetch('/api/extract-actions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-License-Key': license
+      },
+      body: JSON.stringify({ notes })
+    });
+
+    if (res.status === 402) {
+      const data = await res.json().catch(() => ({}));
+      showError('🔒 Pro feature locked: ' + (data.detail || 'A valid license key is required. Enter it above and click Save, then try again.'));
+      return;
+    }
+
+    const data = await res.json();
+    if (!res.ok) { showError(data.detail || 'Something went wrong.'); return; }
+
+    const box = document.getElementById('proResult');
+    box.style.display = 'block';
+    box.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.innerHTML = '<span class="badge pro">PRO RESULT</span>';
+    box.appendChild(header);
+
+    const summaryTitle = document.createElement('h4');
+    summaryTitle.textContent = 'Clean Summary';
+    box.appendChild(summaryTitle);
+    const ul = document.createElement('ul');
+    data.clean_summary.forEach(s => {
+      const li = document.createElement('li');
+      li.textContent = s;
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+
+    const actionsTitle = document.createElement('h4');
+    actionsTitle.textContent = `Action Items (${data.total_action_items})`;
+    box.appendChild(actionsTitle);
+
+    if (data.action_items.length === 0) {
+      const p = document.createElement('div');
+      p.textContent = 'No clear action items detected.';
+      box.appendChild(p);
+    }
+
+    data.action_items.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'action-item';
+      div.innerHTML = `<strong>${item.task}</strong><br/>
+        <span class="meta">Owner: ${item.owner} · Due: ${item.due} · Priority: ${item.priority}</span>`;
+      box.appendChild(div);
+    });
+  }
+</script>
+
+</body>
+</html>
