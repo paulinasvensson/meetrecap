@@ -1,1 +1,1 @@
-Meetings end. Chaos begins. Messy notes, no clear action items, nobody remembers who owns what.\n\nmeetrecap fixes that: paste your notes, get a clean summary + action items in seconds.\n\nJust launched. Try it and tell us what's broken 👇
+Meetings end. The real work starts: decoding your own notes. We built Meetrecap to kill that step — dump in notes, voice memos, or transcripts, get clean summaries + action items in minutes. Just launched, would love your feedback 👇
