@@ -1,0 +1,1 @@
+Are you tired of tedious meeting notes and wasted time preparing for them? MeetRecap uses AI to distill meeting notes into concise, accurate summaries, enabling data-driven decision making. Targeted at businesses and professionals, we're excited to bring this innovative solution to the market.
