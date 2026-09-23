@@ -1,1 +1,7 @@
-Every team has the same problem after meetings: notes are scattered, decisions get lost, and action items live in someone's head instead of a shared doc.\n\nWe built meetrecap to solve this. It's a simple AI tool that takes your raw, messy meeting notes and turns them into a clean summary with clear action items—no manual cleanup required.\n\nThis is our MVP, launching today. We built it because we felt this pain ourselves, and we know countless teams deal with the same friction between 
+Every meeting produces two things: decisions and a mess. For most knowledge workers and small teams without dedicated meeting-ops support, turning that mess into something usable — a clear summary, tracked action items, assigned owners — eats hours every week. Tasks get lost. Discussions get repeated. Momentum stalls.
+
+We built Meetrecap to close that gap. It takes raw input — typed notes, voice memos, or transcripts — and turns it into structured, shareable recaps in minutes, so teams spend less time reconstructing decisions and more time executing on them.
+
+We're launching today, and we're building this closely with early users. If your team runs frequent internal or client meetings and feels the drag of manual cleanup, we'd love for you to try it and tell us what's missing.
+
+The goal isn't another tool to manage — it's giving back the hours you lose after every meeting ends.
