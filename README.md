@@ -1,13 +1,13 @@
 # meetrecap
 
-An AI-ish tool that turns messy meeting notes into clean summaries and action items.
+Turn messy meeting notes into clean summaries and actionable to-dos.
 
-## Features
+## What it does
 
-- **Free — Quick Summary**: extractive summary + basic action item detection, usable
-  immediately by anyone with no license key.
-- **Pro — Pro Recap** (requires a license key): structured recap with owners and
-  deadlines per action item, detected decisions, and key topics.
+- **Free**: Paste your raw meeting notes and get a clean, deduplicated
+  bullet-point summary instantly.
+- **Pro** (license required): Extract structured action items — each with a
+  best-guess owner and deadline — parsed out of your notes.
 
-## Running locally
+## Run locally
 
