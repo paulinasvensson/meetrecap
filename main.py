@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Depends, HTTPException
+import re
+from collections import Counter
+from fastapi import FastAPI, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from entitlements import require_pro
-from recap_engine import free_summarize, full_recap
 
 app = FastAPI(title="meetrecap")
 
@@ -12,152 +13,251 @@ class NotesIn(BaseModel):
     notes: str
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index():
-    return HTML_PAGE
+ACTION_KEYWORDS = [
+    "will", "should", "need to", "needs to", "todo", "to do",
+    "action item", "follow up", "follow-up", "must", "plan to",
+    "going to", "assign", "next step",
+]
+
+STOPWORDS = set("""
+a an the and or but if then so of to in on for with at by from as is
+are was were be been being this that it its our we they you he she
+i me my your their his her not no yes okay ok just also into over
+about up down out than into more most some any all can could would
+""".split())
+
+
+def split_sentences(text: str):
+    text = text.replace("\n", ". ")
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def extract_action_items(text: str):
+    lines = re.split(r"[\n.]+", text)
+    items = []
+    for line in lines:
+        clean = line.strip(" -*\t")
+        if not clean:
+            continue
+        low = clean.lower()
+        if any(kw in low for kw in ACTION_KEYWORDS):
+            items.append(clean)
+    return items
+
+
+def naive_summary(text: str, max_sentences: int = 4):
+    sentences = split_sentences(text)
+    if len(sentences) <= max_sentences:
+        return sentences
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    freq = Counter(w for w in words if w not in STOPWORDS)
+    scored = []
+    for s in sentences:
+        s_words = re.findall(r"[a-zA-Z']+", s.lower())
+        score = sum(freq.get(w, 0) for w in s_words)
+        scored.append((score, s))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = [s for _, s in scored[:max_sentences]]
+    # preserve original order
+    return [s for s in sentences if s in top]
+
+
+DEADLINE_RE = re.compile(
+    r"\b(by|before|due)\s+([A-Za-z]+\s?\d{0,4}|\d{1,2}/\d{1,2}(/\d{2,4})?|next\s+\w+|tomorrow|eod|end of (day|week))",
+    re.IGNORECASE,
+)
+ASSIGNEE_RE = re.compile(r"@(\w+)|\b([A-Z][a-z]+)\s+will\b")
+
+
+def structured_action_items(text: str):
+    raw_items = extract_action_items(text)
+    structured = []
+    for item in raw_items:
+        deadline_match = DEADLINE_RE.search(item)
+        deadline = deadline_match.group(0) if deadline_match else None
+        assignee_match = ASSIGNEE_RE.search(item)
+        assignee = None
+        if assignee_match:
+            assignee = assignee_match.group(1) or assignee_match.group(2)
+        structured.append({
+            "task": item,
+            "assignee": assignee,
+            "deadline": deadline,
+        })
+    return structured
+
+
+def key_topics(text: str, top_n: int = 6):
+    words = re.findall(r"[a-zA-Z']{4,}", text.lower())
+    freq = Counter(w for w in words if w not in STOPWORDS)
+    return [w for w, _ in freq.most_common(top_n)]
+
+
+def extract_decisions(text: str):
+    lines = re.split(r"[\n.]+", text)
+    decisions = []
+    for line in lines:
+        clean = line.strip(" -*\t")
+        low = clean.lower()
+        if any(kw in low for kw in ["decided", "agreed", "decision", "we will go with", "approved"]):
+            decisions.append(clean)
+    return decisions
 
 
 @app.post("/api/summarize")
-async def summarize(payload: NotesIn):
-    if not payload.notes or not payload.notes.strip():
-        raise HTTPException(status_code=400, detail="Please paste some meeting notes first.")
-    return free_summarize(payload.notes)
+def summarize_free(payload: NotesIn):
+    """Free tier: quick summary + basic action item detection."""
+    notes = payload.notes or ""
+    summary = naive_summary(notes)
+    actions = extract_action_items(notes)
+    return {
+        "summary": summary,
+        "action_items": actions[:5],
+        "note": "Free quick recap. Unlock Pro Recap for owners, deadlines, decisions & topics.",
+    }
 
 
-@app.post("/api/recap")
-async def recap(payload: NotesIn, _license=Depends(require_pro)):
-    if not payload.notes or not payload.notes.strip():
-        raise HTTPException(status_code=400, detail="Please paste some meeting notes first.")
-    return full_recap(payload.notes)
+@app.post("/api/summarize/pro")
+def summarize_pro(payload: NotesIn, _=Depends(require_pro)):
+    """Paid tier: full structured recap."""
+    notes = payload.notes or ""
+    summary = naive_summary(notes, max_sentences=6)
+    actions = structured_action_items(notes)
+    decisions = extract_decisions(notes)
+    topics = key_topics(notes)
+    return {
+        "summary": summary,
+        "action_items": actions,
+        "decisions": decisions,
+        "key_topics": topics,
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return HTML_PAGE
 
 
 HTML_PAGE = """
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>meetrecap — messy notes to clean recaps</title>
+<meta charset="utf-8">
+<title>meetrecap</title>
 <style>
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 880px; margin: 40px auto; padding: 0 16px; color: #1a1a2e; background: #f7f8fc; }
-  h1 { font-size: 1.8rem; margin-bottom: 4px; }
-  .sub { color: #555; margin-bottom: 24px; }
-  textarea { width: 100%; min-height: 220px; padding: 12px; font-size: 14px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; }
-  .row { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
-  button { background: #4b3cf5; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
-  button.secondary { background: #eee; color: #333; }
-  button:hover { opacity: 0.9; }
-  .card { background: white; border-radius: 10px; padding: 18px; margin-top: 18px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-  .license-box { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; }
-  .license-box input { flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
-  .error { color: #b00020; font-weight: 600; }
-  .tag { display: inline-block; background: #eef; color: #33c; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-right: 6px; }
-  .action-item { border-left: 3px solid #4b3cf5; padding-left: 10px; margin-bottom: 10px; }
-  .decision { border-left: 3px solid #22a; padding-left: 10px; margin-bottom: 8px; }
-  h3 { margin-bottom: 6px; }
+  body { font-family: -apple-system, Arial, sans-serif; max-width: 820px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { margin-bottom: 4px; }
+  .sub { color: #666; margin-top: 0; }
+  textarea { width: 100%; height: 200px; font-size: 14px; padding: 10px; box-sizing: border-box; }
+  .row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  button { padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  .free-btn { background: #2563eb; color: white; }
+  .pro-btn { background: #16a34a; color: white; }
+  .license-box { margin: 20px 0; padding: 12px; background: #f5f5f5; border-radius: 8px; }
+  .license-box input { padding: 8px; width: 260px; }
+  .result { margin-top: 20px; padding: 16px; background: #fafafa; border: 1px solid #eee; border-radius: 8px; white-space: pre-wrap; }
+  .error { color: #b91c1c; font-weight: bold; }
+  ul { margin: 4px 0; }
+  code { background: #eee; padding: 2px 4px; border-radius: 4px; }
 </style>
 </head>
 <body>
-
-<h1>🗒️ meetrecap</h1>
-<div class="sub">Paste your messy meeting notes below. Get a free quick summary instantly, or unlock the full recap with action items, owners, and due dates.</div>
+<h1>meetrecap</h1>
+<p class="sub">Turn messy meeting notes into clean summaries and action items.</p>
 
 <div class="license-box">
-  <label for="licenseKey"><strong>License Key:</strong></label>
-  <input id="licenseKey" type="text" placeholder="Paste your license key here" />
-  <button class="secondary" onclick="saveKey()">Save</button>
+  <label>License key (for Pro Recap): </label><br/>
+  <input id="licenseKey" type="text" placeholder="e.g. DEMO-PRO-KEY" />
+  <button onclick="saveKey()">Save</button>
+  <span id="keyStatus"></span>
 </div>
 
-<textarea id="notes" placeholder="e.g. Discussed Q3 roadmap. Sarah will send the budget doc by Friday. Decided to postpone the launch. @mike needs to update the client tomorrow..."></textarea>
+<textarea id="notes" placeholder="Paste your messy meeting notes here..."></textarea>
 
 <div class="row">
-  <button onclick="doSummarize()">Free Quick Summary</button>
-  <button onclick="doRecap()">🔒 Full Recap + Action Items (Pro)</button>
+  <button class="free-btn" onclick="runFree()">Quick Summary (Free)</button>
+  <button class="pro-btn" onclick="runPro()">Pro Recap (Paid)</button>
 </div>
 
-<div id="results"></div>
+<div id="result" class="result" style="display:none;"></div>
 
 <script>
 function saveKey() {
   const key = document.getElementById('licenseKey').value.trim();
-  localStorage.setItem('meetrecap_license_key', key);
-  alert('License key saved.');
+  localStorage.setItem('meetrecap_license', key);
+  document.getElementById('keyStatus').innerText = key ? "Saved." : "";
 }
 
 window.onload = function() {
-  const saved = localStorage.getItem('meetrecap_license_key');
+  const saved = localStorage.getItem('meetrecap_license');
   if (saved) document.getElementById('licenseKey').value = saved;
 };
 
-function renderError(msg) {
-  document.getElementById('results').innerHTML = `<div class="card error">${msg}</div>`;
+function showResult(html) {
+  const el = document.getElementById('result');
+  el.style.display = 'block';
+  el.innerHTML = html;
 }
 
-async function doSummarize() {
+async function runFree() {
   const notes = document.getElementById('notes').value;
-  const res = await fetch('/api/summarize', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ notes })
-  });
-  const data = await res.json();
-  if (!res.ok) { renderError(data.detail || 'Something went wrong.'); return; }
-  document.getElementById('results').innerHTML = `
-    <div class="card">
-      <span class="tag">FREE</span>
-      <h3>Quick Summary</h3>
-      <p>${data.summary}</p>
-      <p style="color:#888;font-size:13px">${data.note || ''} (${data.line_count} lines analyzed)</p>
-    </div>
-  `;
-}
-
-async function doRecap() {
-  const notes = document.getElementById('notes').value;
-  const key = localStorage.getItem('meetrecap_license_key') || '';
-  const res = await fetch('/api/recap', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-License-Key': key },
-    body: JSON.stringify({ notes })
-  });
-  const data = await res.json();
-
-  if (res.status === 402) {
-    renderError('🔒 ' + (data.detail || 'This is a paid feature. Enter a valid license key above to unlock it.'));
-    return;
+  showResult("Working...");
+  try {
+    const res = await fetch('/api/summarize', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({notes})
+    });
+    const data = await res.json();
+    let html = "<h3>Summary</h3><ul>" + data.summary.map(s => `<li>${s}</li>`).join('') + "</ul>";
+    html += "<h3>Action Items (basic)</h3>";
+    html += data.action_items.length
+      ? "<ul>" + data.action_items.map(a => `<li>${a}</li>`).join('') + "</ul>"
+      : "<p>None detected.</p>";
+    html += `<p><em>${data.note}</em></p>`;
+    showResult(html);
+  } catch (e) {
+    showResult('<span class="error">Something went wrong. Try again.</span>');
   }
-  if (!res.ok) { renderError(data.detail || 'Something went wrong.'); return; }
+}
 
-  const actionsHtml = data.action_items.length
-    ? data.action_items.map(a => `
-        <div class="action-item">
-          <strong>${a.task}</strong><br>
-          <span style="color:#555;font-size:13px">Owner: ${a.owner} &nbsp;|&nbsp; Due: ${a.due}</span>
-        </div>
-      `).join('')
-    : '<p style="color:#888">No action items detected.</p>';
+async function runPro() {
+  const notes = document.getElementById('notes').value;
+  const key = localStorage.getItem('meetrecap_license') || '';
+  showResult("Working...");
+  try {
+    const res = await fetch('/api/summarize/pro', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-License-Key': key},
+      body: JSON.stringify({notes})
+    });
+    if (res.status === 402) {
+      showResult('<span class="error">This is a Pro feature. Please enter a valid license key above (try DEMO-PRO-KEY) and click Save, then try again.</span>');
+      return;
+    }
+    const data = await res.json();
+    let html = "<h3>Pro Summary</h3><ul>" + data.summary.map(s => `<li>${s}</li>`).join('') + "</ul>";
 
-  const decisionsHtml = data.decisions.length
-    ? data.decisions.map(d => `<div class="decision">${d}</div>`).join('')
-    : '<p style="color:#888">No decisions detected.</p>';
+    html += "<h3>Structured Action Items</h3>";
+    html += data.action_items.length
+      ? "<ul>" + data.action_items.map(a =>
+          `<li>${a.task} ${a.assignee ? '<b>[Owner: ' + a.assignee + ']</b>' : ''} ${a.deadline ? '<b>[Due: ' + a.deadline + ']</b>' : ''}</li>`
+        ).join('') + "</ul>"
+      : "<p>None detected.</p>";
 
-  document.getElementById('results').innerHTML = `
-    <div class="card">
-      <span class="tag">PRO</span>
-      <h3>Clean Summary</h3>
-      <p>${data.clean_summary}</p>
-    </div>
-    <div class="card">
-      <h3>✅ Action Items</h3>
-      ${actionsHtml}
-    </div>
-    <div class="card">
-      <h3>📌 Decisions</h3>
-      ${decisionsHtml}
-    </div>
-  `;
+    html += "<h3>Decisions</h3>";
+    html += data.decisions.length
+      ? "<ul>" + data.decisions.map(d => `<li>${d}</li>`).join('') + "</ul>"
+      : "<p>None detected.</p>";
+
+    html += "<h3>Key Topics</h3><p>" + (data.key_topics.join(', ') || 'None') + "</p>";
+    showResult(html);
+  } catch (e) {
+    showResult('<span class="error">Something went wrong. Try again.</span>');
+  }
 }
 </script>
-
 </body>
 </html>
 """
