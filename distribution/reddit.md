@@ -1,3 +1,3 @@
-# New to MeetRecap: AI-powered meeting notes for professionals
+# Made an AI tool that turns messy meeting notes into clean summaries + action items (launched today)
 
-Hey fellow pros! Excited to announce the launch of MeetRecap, the AI-powered meeting note tool that saves you time and boosts your productivity. Our MVP is specifically designed for project managers, sales teams, and executive leaders like you. Trying it out, share your thoughts and feedback!
+Hey all, I've been building meetrecap because I was tired of ending meetings with a wall of scribbled notes and no clear next steps. You paste in your raw notes (or transcript) and it spits out a clean summary plus a list of action items with owners if mentioned.\n\nIt's brand new, very MVP, so expect rough edges. I'd love feedback on:\n- Does the summary actually capture what matters?\n- Is the action item extraction useful or just noise?\n- What integrations would make this a no-brainer for your workflow?\n\nNot trying to hard-sell here, genuinely want to know if this solves a real problem for other people or if I'm just scratching my own itch. Happy to answer questions or take criticism.
