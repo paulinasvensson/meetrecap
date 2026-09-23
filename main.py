@@ -1,5 +1,4 @@
 import re
-from collections import Counter
 from fastapi import FastAPI, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -9,129 +8,78 @@ from entitlements import require_pro
 app = FastAPI(title="meetrecap")
 
 
-class NotesIn(BaseModel):
+class NotesPayload(BaseModel):
     notes: str
 
 
-ACTION_KEYWORDS = [
-    "will", "should", "need to", "needs to", "todo", "to do",
-    "action item", "follow up", "follow-up", "must", "plan to",
-    "going to", "assign", "next step",
+def _sentences(text: str):
+    text = re.sub(r"\s+", " ", text).strip()
+    # split on sentence-ish boundaries and bullet lines
+    raw = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [s.strip(" -•\t") for s in raw if s.strip(" -•\t")]
+
+
+def make_summary(notes: str) -> list[str]:
+    """Free feature: turn messy notes into a clean bullet-point summary."""
+    sents = _sentences(notes)
+    if not sents:
+        return []
+    # keep sentences with reasonable length, dedupe, cap at 6 bullets
+    seen = set()
+    bullets = []
+    for s in sents:
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(s) < 4:
+            continue
+        bullets.append(s if s.endswith((".", "!", "?")) else s + ".")
+        if len(bullets) >= 6:
+            break
+    return bullets
+
+
+ACTION_VERBS = [
+    "will", "should", "must", "need to", "needs to", "to do", "action",
+    "follow up", "follow-up", "send", "schedule", "review", "prepare",
+    "create", "update", "finalize", "finalise", "contact", "email",
+    "call", "complete", "fix", "investigate", "share", "draft", "assign",
 ]
 
-STOPWORDS = set("""
-a an the and or but if then so of to in on for with at by from as is
-are was were be been being this that it its our we they you he she
-i me my your their his her not no yes okay ok just also into over
-about up down out than into more most some any all can could would
-""".split())
+OWNER_RE = re.compile(r"\b([A-Z][a-z]+)\s+(?:will|to|should|needs to|must)\b")
+DEADLINE_RE = re.compile(
+    r"\b(by\s+\w+day|by\s+\d{1,2}/\d{1,2}(?:/\d{2,4})?|by\s+(?:end of|EOD|EOW)\s*\w*|"
+    r"tomorrow|today|next week|this week|by\s+\w+\s+\d{1,2}(?:st|nd|rd|th)?)\b",
+    re.IGNORECASE,
+)
 
 
-def split_sentences(text: str):
-    text = text.replace("\n", ". ")
-    parts = re.split(r"(?<=[.!?])\s+", text)
-    return [p.strip() for p in parts if p.strip()]
-
-
-def extract_action_items(text: str):
-    lines = re.split(r"[\n.]+", text)
+def extract_action_items(notes: str) -> list[dict]:
+    """Paid feature: pull out action items with likely owner + deadline."""
+    sents = _sentences(notes)
     items = []
-    for line in lines:
-        clean = line.strip(" -*\t")
-        if not clean:
-            continue
-        low = clean.lower()
-        if any(kw in low for kw in ACTION_KEYWORDS):
-            items.append(clean)
+    for s in sents:
+        low = s.lower()
+        if any(v in low for v in ACTION_VERBS):
+            owner_match = OWNER_RE.search(s)
+            deadline_match = DEADLINE_RE.search(s)
+            items.append({
+                "task": s if s.endswith((".", "!", "?")) else s + ".",
+                "owner": owner_match.group(1) if owner_match else "Unassigned",
+                "deadline": deadline_match.group(0) if deadline_match else "No deadline found",
+            })
     return items
 
 
-def naive_summary(text: str, max_sentences: int = 4):
-    sentences = split_sentences(text)
-    if len(sentences) <= max_sentences:
-        return sentences
-    words = re.findall(r"[a-zA-Z']+", text.lower())
-    freq = Counter(w for w in words if w not in STOPWORDS)
-    scored = []
-    for s in sentences:
-        s_words = re.findall(r"[a-zA-Z']+", s.lower())
-        score = sum(freq.get(w, 0) for w in s_words)
-        scored.append((score, s))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top = [s for _, s in scored[:max_sentences]]
-    # preserve original order
-    return [s for s in sentences if s in top]
-
-
-DEADLINE_RE = re.compile(
-    r"\b(by|before|due)\s+([A-Za-z]+\s?\d{0,4}|\d{1,2}/\d{1,2}(/\d{2,4})?|next\s+\w+|tomorrow|eod|end of (day|week))",
-    re.IGNORECASE,
-)
-ASSIGNEE_RE = re.compile(r"@(\w+)|\b([A-Z][a-z]+)\s+will\b")
-
-
-def structured_action_items(text: str):
-    raw_items = extract_action_items(text)
-    structured = []
-    for item in raw_items:
-        deadline_match = DEADLINE_RE.search(item)
-        deadline = deadline_match.group(0) if deadline_match else None
-        assignee_match = ASSIGNEE_RE.search(item)
-        assignee = None
-        if assignee_match:
-            assignee = assignee_match.group(1) or assignee_match.group(2)
-        structured.append({
-            "task": item,
-            "assignee": assignee,
-            "deadline": deadline,
-        })
-    return structured
-
-
-def key_topics(text: str, top_n: int = 6):
-    words = re.findall(r"[a-zA-Z']{4,}", text.lower())
-    freq = Counter(w for w in words if w not in STOPWORDS)
-    return [w for w, _ in freq.most_common(top_n)]
-
-
-def extract_decisions(text: str):
-    lines = re.split(r"[\n.]+", text)
-    decisions = []
-    for line in lines:
-        clean = line.strip(" -*\t")
-        low = clean.lower()
-        if any(kw in low for kw in ["decided", "agreed", "decision", "we will go with", "approved"]):
-            decisions.append(clean)
-    return decisions
-
-
 @app.post("/api/summarize")
-def summarize_free(payload: NotesIn):
-    """Free tier: quick summary + basic action item detection."""
-    notes = payload.notes or ""
-    summary = naive_summary(notes)
-    actions = extract_action_items(notes)
-    return {
-        "summary": summary,
-        "action_items": actions[:5],
-        "note": "Free quick recap. Unlock Pro Recap for owners, deadlines, decisions & topics.",
-    }
+def summarize(payload: NotesPayload):
+    return {"summary": make_summary(payload.notes)}
 
 
-@app.post("/api/summarize/pro")
-def summarize_pro(payload: NotesIn, _=Depends(require_pro)):
-    """Paid tier: full structured recap."""
-    notes = payload.notes or ""
-    summary = naive_summary(notes, max_sentences=6)
-    actions = structured_action_items(notes)
-    decisions = extract_decisions(notes)
-    topics = key_topics(notes)
-    return {
-        "summary": summary,
-        "action_items": actions,
-        "decisions": decisions,
-        "key_topics": topics,
-    }
+@app.post("/api/action-items")
+def action_items(payload: NotesPayload, _=Depends(require_pro)):
+    return {"action_items": extract_action_items(payload.notes)}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -141,68 +89,77 @@ def index():
 
 HTML_PAGE = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>meetrecap</title>
-<style>
-  body { font-family: -apple-system, Arial, sans-serif; max-width: 820px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
-  h1 { margin-bottom: 4px; }
-  .sub { color: #666; margin-top: 0; }
-  textarea { width: 100%; height: 200px; font-size: 14px; padding: 10px; box-sizing: border-box; }
-  .row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-  button { padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-  .free-btn { background: #2563eb; color: white; }
-  .pro-btn { background: #16a34a; color: white; }
-  .license-box { margin: 20px 0; padding: 12px; background: #f5f5f5; border-radius: 8px; }
-  .license-box input { padding: 8px; width: 260px; }
-  .result { margin-top: 20px; padding: 16px; background: #fafafa; border: 1px solid #eee; border-radius: 8px; white-space: pre-wrap; }
-  .error { color: #b91c1c; font-weight: bold; }
-  ul { margin: 4px 0; }
-  code { background: #eee; padding: 2px 4px; border-radius: 4px; }
-</style>
+<script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-<h1>meetrecap</h1>
-<p class="sub">Turn messy meeting notes into clean summaries and action items.</p>
+<body class="bg-slate-50 font-sans text-slate-800">
+<div class="max-w-3xl mx-auto p-4">
 
-<div class="license-box">
-  <label>License key (for Pro Recap): </label><br/>
-  <input id="licenseKey" type="text" placeholder="e.g. DEMO-PRO-KEY" />
-  <button onclick="saveKey()">Save</button>
-  <span id="keyStatus"></span>
+  <div class="mb-3">
+    <h1 class="text-xl font-semibold text-slate-900">meetrecap</h1>
+    <p class="text-sm text-slate-500">Paste messy meeting notes. Get a clean summary free, unlock structured action items with a license.</p>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-lg shadow-sm p-4 mb-3">
+    <textarea id="notes" rows="5"
+      class="w-full rounded-lg border border-slate-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+      placeholder="e.g. Sarah will send the proposal by Friday. We need to review the budget. John to schedule a follow-up call next week..."></textarea>
+
+    <div class="flex flex-wrap gap-2 mt-3">
+      <button id="summarizeBtn"
+        class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+        Summarize (free)
+      </button>
+      <button id="actionsBtn"
+        class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+        Extract Action Items (pro)
+      </button>
+    </div>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-lg shadow-sm p-4 mb-3">
+    <label class="block text-xs font-medium text-slate-500 mb-1">License key (for Pro features)</label>
+    <input id="licenseKey" type="text" placeholder="Paste your license key"
+      class="w-full rounded-lg border border-slate-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+  </div>
+
+  <div id="result" class="bg-white border border-slate-200 rounded-lg shadow-sm p-4 min-h-[80px] text-sm">
+    <p class="text-slate-400">Results will appear here.</p>
+  </div>
+
 </div>
-
-<textarea id="notes" placeholder="Paste your messy meeting notes here..."></textarea>
-
-<div class="row">
-  <button class="free-btn" onclick="runFree()">Quick Summary (Free)</button>
-  <button class="pro-btn" onclick="runPro()">Pro Recap (Paid)</button>
-</div>
-
-<div id="result" class="result" style="display:none;"></div>
 
 <script>
-function saveKey() {
-  const key = document.getElementById('licenseKey').value.trim();
-  localStorage.setItem('meetrecap_license', key);
-  document.getElementById('keyStatus').innerText = key ? "Saved." : "";
+const licenseInput = document.getElementById('licenseKey');
+licenseInput.value = localStorage.getItem('meetrecap_license') || '';
+licenseInput.addEventListener('input', () => {
+  localStorage.setItem('meetrecap_license', licenseInput.value.trim());
+});
+
+const resultBox = document.getElementById('result');
+
+function renderList(title, items, renderItem) {
+  if (!items || items.length === 0) {
+    resultBox.innerHTML = `<p class="text-slate-400">No ${title.toLowerCase()} found. Try adding more detail to your notes.</p>`;
+    return;
+  }
+  const html = `
+    <h2 class="text-sm font-semibold text-slate-900 mb-2">${title}</h2>
+    <ul class="space-y-2">
+      ${items.map(renderItem).join('')}
+    </ul>
+  `;
+  resultBox.innerHTML = html;
 }
 
-window.onload = function() {
-  const saved = localStorage.getItem('meetrecap_license');
-  if (saved) document.getElementById('licenseKey').value = saved;
-};
-
-function showResult(html) {
-  const el = document.getElementById('result');
-  el.style.display = 'block';
-  el.innerHTML = html;
-}
-
-async function runFree() {
-  const notes = document.getElementById('notes').value;
-  showResult("Working...");
+document.getElementById('summarizeBtn').addEventListener('click', async () => {
+  const notes = document.getElementById('notes').value.trim();
+  if (!notes) { resultBox.innerHTML = '<p class="text-red-500">Paste some notes first.</p>'; return; }
+  resultBox.innerHTML = '<p class="text-slate-400">Summarizing...</p>';
   try {
     const res = await fetch('/api/summarize', {
       method: 'POST',
@@ -210,53 +167,42 @@ async function runFree() {
       body: JSON.stringify({notes})
     });
     const data = await res.json();
-    let html = "<h3>Summary</h3><ul>" + data.summary.map(s => `<li>${s}</li>`).join('') + "</ul>";
-    html += "<h3>Action Items (basic)</h3>";
-    html += data.action_items.length
-      ? "<ul>" + data.action_items.map(a => `<li>${a}</li>`).join('') + "</ul>"
-      : "<p>None detected.</p>";
-    html += `<p><em>${data.note}</em></p>`;
-    showResult(html);
+    renderList('Summary', data.summary, (s) => `<li class="flex gap-2"><span class="text-indigo-500">•</span><span>${s}</span></li>`);
   } catch (e) {
-    showResult('<span class="error">Something went wrong. Try again.</span>');
+    resultBox.innerHTML = '<p class="text-red-500">Something went wrong. Try again.</p>';
   }
-}
+});
 
-async function runPro() {
-  const notes = document.getElementById('notes').value;
+document.getElementById('actionsBtn').addEventListener('click', async () => {
+  const notes = document.getElementById('notes').value.trim();
+  if (!notes) { resultBox.innerHTML = '<p class="text-red-500">Paste some notes first.</p>'; return; }
   const key = localStorage.getItem('meetrecap_license') || '';
-  showResult("Working...");
+  resultBox.innerHTML = '<p class="text-slate-400">Extracting action items...</p>';
   try {
-    const res = await fetch('/api/summarize/pro', {
+    const res = await fetch('/api/action-items', {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-License-Key': key},
       body: JSON.stringify({notes})
     });
     if (res.status === 402) {
-      showResult('<span class="error">This is a Pro feature. Please enter a valid license key above (try DEMO-PRO-KEY) and click Save, then try again.</span>');
+      resultBox.innerHTML = `
+        <div class="border border-amber-300 bg-amber-50 rounded-lg p-3">
+          <p class="font-medium text-amber-800">Pro license required</p>
+          <p class="text-amber-700 mt-1">Enter a valid license key above to unlock action item extraction with owners and deadlines.</p>
+        </div>`;
       return;
     }
     const data = await res.json();
-    let html = "<h3>Pro Summary</h3><ul>" + data.summary.map(s => `<li>${s}</li>`).join('') + "</ul>";
-
-    html += "<h3>Structured Action Items</h3>";
-    html += data.action_items.length
-      ? "<ul>" + data.action_items.map(a =>
-          `<li>${a.task} ${a.assignee ? '<b>[Owner: ' + a.assignee + ']</b>' : ''} ${a.deadline ? '<b>[Due: ' + a.deadline + ']</b>' : ''}</li>`
-        ).join('') + "</ul>"
-      : "<p>None detected.</p>";
-
-    html += "<h3>Decisions</h3>";
-    html += data.decisions.length
-      ? "<ul>" + data.decisions.map(d => `<li>${d}</li>`).join('') + "</ul>"
-      : "<p>None detected.</p>";
-
-    html += "<h3>Key Topics</h3><p>" + (data.key_topics.join(', ') || 'None') + "</p>";
-    showResult(html);
+    renderList('Action Items', data.action_items, (item) => `
+      <li class="border border-slate-100 rounded-lg p-2 bg-slate-50">
+        <p class="text-slate-900">${item.task}</p>
+        <p class="text-xs text-slate-500 mt-1">Owner: <span class="font-medium text-slate-700">${item.owner}</span> · Deadline: <span class="font-medium text-slate-700">${item.deadline}</span></p>
+      </li>
+    `);
   } catch (e) {
-    showResult('<span class="error">Something went wrong. Try again.</span>');
+    resultBox.innerHTML = '<p class="text-red-500">Something went wrong. Try again.</p>';
   }
-}
+});
 </script>
 </body>
 </html>
