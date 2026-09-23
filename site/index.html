@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetRecap: Efficient Meeting Summaries for Busy Professionals</title>
+<meta name="description" content="Streamline your meetings with MeetRecap&#x27;s AI-powered note-taking. Get concise summaries, free up time, and make data-driven decisions.">
+<meta name="keywords" content="meeting summarization, AI-powered meeting notes, data-driven decision making, meeting efficiency, collaboration tools, project management">
+<meta property="og:title" content="MeetRecap: Efficient Meeting Summaries for Busy Professionals">
+<meta property="og:description" content="Streamline your meetings with MeetRecap&#x27;s AI-powered note-taking. Get concise summaries, free up time, and make data-driven decisions.">
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-white text-slate-900">
+<header class="px-6 py-4 border-b border-slate-100">
+  <span class="font-bold text-lg">meetrecap</span>
+</header>
+<main>
+  <section class="text-center py-20 px-6 bg-slate-50">
+    <h1 class="text-4xl font-extrabold max-w-2xl mx-auto">Simplify Your Meetings, Amplify Your Productivity</h1>
+    <p class="text-lg text-slate-600 mt-4 max-w-xl mx-auto">MeetRecap&#x27;s AI-powered notes summarization streamlines your workflow, saving time and boosting business insights</p>
+    <a href="#pricing" class="mt-8 inline-block bg-slate-900 text-white px-6 py-3 rounded-lg font-medium hover:bg-slate-700">
+      Get Started
+    </a>
+  </section>
+  <section class="py-16 px-6 max-w-2xl mx-auto">
+    <ul class="space-y-3"><li class="flex gap-2"><span class="text-emerald-600">✓</span><span>Concise meeting summaries in minutes, not hours</span></li><li class="flex gap-2"><span class="text-emerald-600">✓</span><span>Accurate notes, every time, no human error</span></li><li class="flex gap-2"><span class="text-emerald-600">✓</span><span>Integrate with your favorite collaboration tools</span></li><li class="flex gap-2"><span class="text-emerald-600">✓</span><span>Search and reference notes from any meeting</span></li></ul>
+  </section>
+  <section id="pricing" class="py-16 px-6 text-center"><h2 class="text-2xl font-bold mb-2">Pricing</h2><p class="text-slate-600">Coming soon — <a class="underline" href="mailto:hello@example.com">get in touch</a> for early access.</p></section>
+  <section class="py-16 px-6 max-w-2xl mx-auto">
+    <h2 class="text-2xl font-bold mb-4">FAQ</h2>
+    <div class="border-b border-slate-200 py-4"><p class="font-medium">How does MeetRecap work?</p><p class="text-slate-600 mt-1">Our AI algorithm analyzes meeting notes, distilling key points, and eliminating noise</p></div><div class="border-b border-slate-200 py-4"><p class="font-medium">Is MeetRecap secure?</p><p class="text-slate-600 mt-1">Yes, we use enterprise-grade encryption and GDPR-compliant servers to ensure your data is always protected</p></div><div class="border-b border-slate-200 py-4"><p class="font-medium">Can I customize my meeting summaries?</p><p class="text-slate-600 mt-1">Absolutely, our platform allows you to tailor your summary format and content to your specific needs</p></div><div class="border-b border-slate-200 py-4"><p class="font-medium">What types of meetings can MeetRecap handle?</p><p class="text-slate-600 mt-1">From sales meetings to board meetings, MeetRecap&#x27;s AI technology adapts to various meeting styles and content</p></div>
+  </section>
+</main>
+<footer class="text-center text-sm text-slate-500 py-8">&copy; meetrecap</footer>
+<script>
+(function() {
+  var API_BASE = "http://localhost:8000";
+  var VENTURE_ID = "6d09a37c596248ef919c0138eec83439";
+  document.querySelectorAll('[data-checkout-tier]').forEach(function(button) {
+    button.addEventListener('click', async function() {
+      var tier = button.getAttribute('data-checkout-tier');
+      button.disabled = true;
+      var originalText = button.textContent;
+      button.textContent = 'Redirecting...';
+      try {
+        var res = await fetch(API_BASE + '/ventures/' + VENTURE_ID + '/checkout/' + tier, { method: 'POST' });
+        if (!res.ok) throw new Error('checkout failed');
+        var data = await res.json();
+        if (data.checkout_url) window.location.href = data.checkout_url;
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = originalText;
+        alert('Something went wrong starting checkout. Please try again.');
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>
