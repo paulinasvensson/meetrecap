@@ -1,1 +1,1 @@
-MeetRecap: AI-generated meeting notes in seconds
+Meetings end. Chaos begins. Messy notes, no clear action items, nobody remembers who owns what.\n\nmeetrecap fixes that: paste your notes, get a clean summary + action items in seconds.\n\nJust launched. Try it and tell us what's broken 👇
