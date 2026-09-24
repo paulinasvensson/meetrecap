@@ -6,8 +6,8 @@ gate a new endpoint by adding `Depends(require_pro)` to it instead.
 import httpx
 from fastapi import Header, HTTPException
 
-NDS_API_BASE = 'http://localhost:8000'
-VENTURE_ID = 'a7300dcc385a4ae59768204f8f4438f6'
+NDS_API_BASE = 'https://nds-command-center.onrender.com'
+VENTURE_ID = '745a7b7fbabd4c6e9465365f291ccbd0'
 
 
 async def require_pro(x_license_key: str = Header(default="")) -> str:
