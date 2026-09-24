@@ -1,1 +1,1 @@
-Meetings end. The real work starts: decoding your own notes. We built Meetrecap to kill that step — dump in notes, voice memos, or transcripts, get clean summaries + action items in minutes. Just launched, would love your feedback 👇
+Meeting notes are chaos. Meetrecap turns them into clean summaries + action items in seconds. No more re-reading scribbles at 6pm trying to remember who owns what. Just launched, give it a spin 👇
