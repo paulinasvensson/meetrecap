@@ -1,29 +1,37 @@
-from fastapi import FastAPI, Depends
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
-
+from fastapi import FastAPI, Depends, Body
+from fastapi.responses import HTMLResponse, JSONResponse
 from entitlements import require_pro
-from summarizer import basic_summary, full_recap
+import summarizer
 
 app = FastAPI(title="meetrecap")
 
 
-class NotesIn(BaseModel):
-    notes: str
+@app.post("/api/quick-summary")
+async def quick_summary(payload: dict = Body(...)):
+    notes = payload.get("notes", "")
+    if not notes.strip():
+        return JSONResponse({"error": "Please paste some meeting notes."}, status_code=400)
+    bullets = summarizer.quick_summary(notes, max_bullets=3)
+    action_count = len(summarizer.extract_action_items(notes))
+    return {
+        "summary": bullets,
+        "action_item_teaser": f"{action_count} potential action item(s) detected. Upgrade to extract owners & due dates."
+        if action_count else "No obvious action items detected."
+    }
 
 
-@app.post("/api/summarize/free")
-def summarize_free(payload: NotesIn):
-    return basic_summary(payload.notes)
-
-
-@app.post("/api/summarize/pro")
-def summarize_pro(payload: NotesIn, _=Depends(require_pro)):
-    return full_recap(payload.notes)
+@app.post("/api/full-recap")
+async def full_recap(payload: dict = Body(...), _lic=Depends(require_pro)):
+    notes = payload.get("notes", "")
+    if not notes.strip():
+        return JSONResponse({"error": "Please paste some meeting notes."}, status_code=400)
+    summary = summarizer.full_summary(notes, max_bullets=6)
+    actions = summarizer.extract_action_items(notes)
+    return {"summary": summary, "action_items": actions}
 
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+async def index():
     return HTML_PAGE
 
 
@@ -31,51 +39,42 @@ HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>meetrecap</title>
 <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans">
-<div class="max-w-3xl mx-auto p-4">
+<body class="bg-white text-slate-800 font-sans">
+<div class="max-w-2xl mx-auto p-4">
 
-  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
-    <div class="flex items-center justify-between mb-3">
-      <h1 class="text-lg font-semibold text-slate-900">meetrecap</h1>
-      <span class="text-xs text-slate-400">messy notes → clean recap</span>
-    </div>
-
-    <textarea id="notes" rows="5"
-      class="w-full rounded-lg border border-slate-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-      placeholder="Paste your raw meeting notes here...
-e.g.
-- discussed Q3 roadmap
-- Sarah will send the deck by Friday
-- @Tom needs to follow up with legal
-- team agreed to launch next week"></textarea>
-
-    <div class="flex flex-wrap gap-2 mt-3">
-      <button id="freeBtn"
-        class="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200 transition">
-        Free Preview
-      </button>
-      <button id="proBtn"
-        class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition">
-        Get Full Recap (Pro)
-      </button>
-
-      <div class="flex-1"></div>
-
-      <input id="licenseKey" type="text" placeholder="License key"
-        class="w-40 rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-    </div>
-
-    <div id="result" class="mt-4 text-sm text-slate-700 hidden">
-      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2" id="resultBody"></div>
-    </div>
-
-    <p id="msg" class="mt-2 text-xs"></p>
+  <div class="mb-4">
+    <h1 class="text-xl font-semibold text-slate-900">meetrecap</h1>
+    <p class="text-sm text-slate-500">Paste messy meeting notes. Get a clean summary and action items.</p>
   </div>
+
+  <textarea id="notes" rows="5"
+    class="w-full rounded-lg border border-slate-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+    placeholder="Paste your raw meeting notes here..."></textarea>
+
+  <div class="flex flex-wrap gap-2 mt-3">
+    <button id="quickBtn"
+      class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition">
+      Quick Summary (Free)
+    </button>
+    <button id="proBtn"
+      class="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition">
+      Full Recap + Action Items (Pro)
+    </button>
+  </div>
+
+  <div class="mt-4">
+    <label class="block text-xs font-medium text-slate-500 mb-1">License Key</label>
+    <input id="licenseKey" type="text" placeholder="Enter your license key"
+      class="w-full rounded-lg border border-slate-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+  </div>
+
+  <div id="result" class="mt-4 text-sm"></div>
+
 </div>
 
 <script>
@@ -86,75 +85,76 @@ licenseInput.addEventListener('input', () => {
 });
 
 const resultDiv = document.getElementById('result');
-const resultBody = document.getElementById('resultBody');
-const msg = document.getElementById('msg');
 
-function showMsg(text, isError) {
-  msg.textContent = text;
-  msg.className = "mt-2 text-xs " + (isError ? "text-red-600" : "text-green-600");
+function renderError(msg) {
+  resultDiv.innerHTML = `<div class="rounded-lg border border-red-200 bg-red-50 text-red-700 p-3">${msg}</div>`;
 }
 
-function renderFree(data) {
-  resultBody.innerHTML = `
-    <div><span class="font-semibold text-slate-900">Preview Summary:</span> ${data.summary}</div>
-    <div class="text-xs text-slate-400">${data.shown_lines} of ${data.total_lines} lines shown${data.truncated ? ' — upgrade for full recap & action items' : ''}</div>
-  `;
-  resultDiv.classList.remove('hidden');
+function renderSummary(title, bullets, extra) {
+  let html = `<div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+    <h2 class="font-semibold text-slate-900 mb-2">${title}</h2>
+    <ul class="list-disc pl-5 space-y-1">`;
+  bullets.forEach(b => html += `<li>${b}</li>`);
+  html += `</ul>`;
+  if (extra) html += `<div class="mt-2 text-slate-600">${extra}</div>`;
+  html += `</div>`;
+  resultDiv.innerHTML = html;
 }
 
-function renderPro(data) {
-  let items = data.action_items.map(a => `
-    <li class="border-l-2 border-indigo-500 pl-2">
-      <div class="text-slate-800">${a.task}</div>
-      <div class="text-xs text-slate-400">Assignee: ${a.assignee} · Due: ${a.due}</div>
-    </li>`).join('');
-  resultBody.innerHTML = `
-    <div><span class="font-semibold text-slate-900">Summary:</span> ${data.summary}</div>
-    <div class="font-semibold text-slate-900 mt-2">Action Items (${data.action_item_count})</div>
-    <ul class="space-y-2 mt-1">${items || '<li class="text-slate-400 text-xs">No action items detected.</li>'}</ul>
-  `;
-  resultDiv.classList.remove('hidden');
-}
-
-document.getElementById('freeBtn').addEventListener('click', async () => {
-  const notes = document.getElementById('notes').value;
-  showMsg('Summarizing...', false);
-  try {
-    const res = await fetch('/api/summarize/free', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notes })
+function renderFull(summary, actions) {
+  let html = `<div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+    <div>
+      <h2 class="font-semibold text-slate-900 mb-2">Summary</h2>
+      <ul class="list-disc pl-5 space-y-1">`;
+  summary.forEach(b => html += `<li>${b}</li>`);
+  html += `</ul></div><div>
+      <h2 class="font-semibold text-slate-900 mb-2">Action Items</h2>`;
+  if (actions.length === 0) {
+    html += `<p class="text-slate-500">No action items detected.</p>`;
+  } else {
+    html += `<ul class="space-y-1">`;
+    actions.forEach(a => {
+      html += `<li class="flex flex-wrap gap-2 items-center">
+        <span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 text-xs font-medium">${a.owner || 'Unassigned'}</span>
+        <span>${a.task}</span>
+        ${a.due ? `<span class="px-2 py-0.5 rounded bg-amber-100 text-amber-700 text-xs">${a.due}</span>` : ''}
+      </li>`;
     });
-    const data = await res.json();
-    if (!res.ok) { showMsg(data.detail || 'Something went wrong.', true); return; }
-    renderFree(data);
-    showMsg('', false);
-  } catch (e) {
-    showMsg('Network error.', true);
+    html += `</ul>`;
   }
+  html += `</div></div>`;
+  resultDiv.innerHTML = html;
+}
+
+document.getElementById('quickBtn').addEventListener('click', async () => {
+  const notes = document.getElementById('notes').value;
+  resultDiv.innerHTML = `<p class="text-slate-400">Summarizing...</p>`;
+  const res = await fetch('/api/quick-summary', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({notes})
+  });
+  const data = await res.json();
+  if (!res.ok) { renderError(data.error || 'Something went wrong.'); return; }
+  renderSummary('Quick Summary', data.summary, data.action_item_teaser);
 });
 
 document.getElementById('proBtn').addEventListener('click', async () => {
   const notes = document.getElementById('notes').value;
   const key = localStorage.getItem('meetrecap_license') || '';
-  showMsg('Generating full recap...', false);
-  try {
-    const res = await fetch('/api/summarize/pro', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-License-Key': key },
-      body: JSON.stringify({ notes })
-    });
-    if (res.status === 402) {
-      showMsg('This is a Pro feature. Enter a valid license key above (get one on our pricing page) to unlock the full recap.', true);
-      return;
-    }
-    const data = await res.json();
-    if (!res.ok) { showMsg(data.detail || 'Something went wrong.', true); return; }
-    renderPro(data);
-    showMsg('', false);
-  } catch (e) {
-    showMsg('Network error.', true);
+  resultDiv.innerHTML = `<p class="text-slate-400">Generating full recap...</p>`;
+  const res = await fetch('/api/full-recap', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-License-Key': key},
+    body: JSON.stringify({notes})
+  });
+  const data = await res.json();
+  if (res.status === 402) {
+    renderError(data.detail || 'This feature requires a valid license key. Please purchase a plan and enter your key above.');
+    return;
   }
+  if (!res.ok) { renderError(data.error || 'Something went wrong.'); return; }
+  renderFull(data.summary, data.action_items);
 });
 </script>
 </body>
