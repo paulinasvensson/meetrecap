@@ -1,89 +1,75 @@
 import re
-from datetime import datetime
+from collections import Counter
+
+STOPWORDS = set("""
+a an the and or but if then so of to in on at for with by from as is are was were
+be been being this that these those it its it's we you they he she i our your their
+about into over under again further not no nor can will just should now
+""".split())
 
 ACTION_KEYWORDS = [
-    "will", "need to", "needs to", "todo", "to-do", "action item",
-    "should", "must", "follow up", "follow-up", "by friday", "by monday",
-    "let's", "lets", "plan to", "going to",
+    "will", "need to", "needs to", "should", "must", "todo", "to-do", "action item",
+    "action:", "follow up", "follow-up", "by friday", "by monday", "assign", "owns",
+    "responsible", "due"
 ]
 
-DATE_HINTS = re.compile(
-    r"\b(by\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-    r"today|tomorrow|eod|eow|next week|\d{1,2}/\d{1,2}))\b",
-    re.IGNORECASE,
+DATE_PATTERN = re.compile(
+    r"\b(by\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"today|tomorrow|next week|end of week|eow|\d{1,2}/\d{1,2}(?:/\d{2,4})?|"
+    r"\d{4}-\d{2}-\d{2})\b", re.IGNORECASE
 )
 
-ASSIGNEE_PATTERNS = [
-    re.compile(r"@(\w+)"),
-    re.compile(r"^([A-Z][a-z]+):"),
-    re.compile(r"\b([A-Z][a-z]+)\s+(?:will|to|should|needs to|needs)\b"),
-]
+OWNER_PATTERN = re.compile(r"@([A-Za-z][A-Za-z0-9_\-]*)|\b([A-Z][a-z]+)\s+will\b")
 
 
-def _clean_lines(notes: str):
-    raw = [l.strip(" -•\t") for l in notes.splitlines()]
-    return [l for l in raw if l]
+def _split_sentences(text):
+    text = text.replace("\n", ". ")
+    parts = re.split(r"(?<=[.!?])\s+|\n+|•|-\s{1,2}", text)
+    return [p.strip(" .-\t") for p in parts if p.strip(" .-\t")]
 
 
-def _is_action(line: str) -> bool:
-    low = line.lower()
-    return any(kw in low for kw in ACTION_KEYWORDS)
+def quick_summary(text, max_bullets=3):
+    """Simple frequency-based extractive summary - free tier."""
+    sentences = _split_sentences(text)
+    if not sentences:
+        return []
+
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    freq = Counter(w for w in words if w not in STOPWORDS and len(w) > 2)
+
+    scored = []
+    for s in sentences:
+        s_words = re.findall(r"[a-zA-Z']+", s.lower())
+        score = sum(freq.get(w, 0) for w in s_words)
+        norm = score / (len(s_words) + 1)
+        scored.append((norm, s))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = [s for _, s in scored[:max_bullets]]
+    # preserve original order
+    ordered = [s for s in sentences if s in top]
+    return ordered[:max_bullets]
 
 
-def _find_assignee(line: str):
-    for pat in ASSIGNEE_PATTERNS:
-        m = pat.search(line)
-        if m:
-            return m.group(1)
-    return None
+def full_summary(text, max_bullets=6):
+    return quick_summary(text, max_bullets=max_bullets)
 
 
-def _find_due(line: str):
-    m = DATE_HINTS.search(line)
-    return m.group(1).title() if m else None
-
-
-def basic_summary(notes: str, max_lines: int = 4):
-    """Free preview: short summary, no action-item structuring."""
-    lines = _clean_lines(notes)
-    if not lines:
-        return {"summary": "No notes provided.", "preview_lines": 0}
-    preview = lines[:max_lines]
-    summary = " ".join(preview)
-    if len(summary) > 320:
-        summary = summary[:320].rsplit(" ", 1)[0] + "..."
-    return {
-        "summary": summary,
-        "total_lines": len(lines),
-        "shown_lines": len(preview),
-        "truncated": len(lines) > max_lines,
-    }
-
-
-def full_recap(notes: str):
-    """Paid feature: full summary + structured action items."""
-    lines = _clean_lines(notes)
-    if not lines:
-        return {"summary": "No notes provided.", "action_items": []}
-
-    summary_lines = lines[:12]
-    summary = " ".join(summary_lines)
-    if len(summary) > 900:
-        summary = summary[:900].rsplit(" ", 1)[0] + "..."
-
-    action_items = []
-    for line in lines:
-        if _is_action(line):
-            action_items.append({
-                "task": line,
-                "assignee": _find_assignee(line) or "Unassigned",
-                "due": _find_due(line) or "No date specified",
+def extract_action_items(text):
+    """Heuristic action-item extraction - pro tier."""
+    sentences = _split_sentences(text)
+    items = []
+    for s in sentences:
+        lower = s.lower()
+        if any(kw in lower for kw in ACTION_KEYWORDS):
+            date_match = DATE_PATTERN.search(s)
+            owner_match = OWNER_PATTERN.search(s)
+            owner = None
+            if owner_match:
+                owner = owner_match.group(1) or owner_match.group(2)
+            items.append({
+                "task": s.strip(),
+                "owner": owner,
+                "due": date_match.group(0) if date_match else None,
             })
-
-    return {
-        "summary": summary,
-        "total_lines": len(lines),
-        "action_items": action_items,
-        "action_item_count": len(action_items),
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-    }
+    return items
