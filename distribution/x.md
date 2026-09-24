@@ -1,1 +1,5 @@
-Meeting notes are chaos. Meetrecap turns them into clean summaries + action items in seconds. No more re-reading scribbles at 6pm trying to remember who owns what. Just launched, give it a spin 👇
+Meetings end. Chaos begins. Messy notes, no clear owners, follow-ups nobody remembers.
+
+Meetrecap turns your raw meeting notes into clean summaries + action items with owners, automatically.
+
+Just launched. Try it and tell us what breaks 👇
