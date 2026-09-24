@@ -1,1 +1,1 @@
-Messy meeting notes, meet clarity. Meetrecap turns scattered notes into clean summaries and action items instantly. Try it free.
+Messy meeting notes, meet your match. Meetrecap turns chaos into clear summaries and action items in seconds.
