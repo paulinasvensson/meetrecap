@@ -1,110 +1,89 @@
-"""
-Core meetrecap logic: turns messy meeting notes into a clean summary and a
-list of action items, using lightweight, dependency-free NLP heuristics
-(word-frequency sentence scoring + pattern-based action-item extraction).
-"""
-
 import re
+from datetime import datetime
 
-STOPWORDS = set(
-    """
-    a an the and or but if then so to of in on at for with as by from is are
-    was were be been being this that these those it its it's we you they he
-    she i our your their will would can could should shall may might must
-    not no yes just also very really about into over under again further
-    once here there when where why how all any both each few more most
-    other some such only own same than too s t don now let ok well um okay
-    meeting notes today discussed talked said going need needs
-    """.split()
-)
+ACTION_KEYWORDS = [
+    "will", "need to", "needs to", "todo", "to-do", "action item",
+    "should", "must", "follow up", "follow-up", "by friday", "by monday",
+    "let's", "lets", "plan to", "going to",
+]
 
-SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
-WORD_RE = re.compile(r"[A-Za-z']+")
-
-ACTION_KEYWORDS = re.compile(
-    r"\b(will|need to|needs to|should|must|action item|todo|to-do|follow up|"
-    r"assign|responsible for|by (monday|tuesday|wednesday|thursday|friday|"
-    r"saturday|sunday|eod|tomorrow|next week|end of day))\b",
+DATE_HINTS = re.compile(
+    r"\b(by\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"today|tomorrow|eod|eow|next week|\d{1,2}/\d{1,2}))\b",
     re.IGNORECASE,
 )
 
-DEADLINE_RE = re.compile(
-    r"\bby (monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-    r"tomorrow|next week|eod|end of day|\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b",
-    re.IGNORECASE,
-)
-
-OWNER_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_]*)")
-OWNER_NAME_RE = re.compile(r"\b([A-Z][a-z]+)\s+(?:will|should|needs? to|must)\b")
-
-URGENT_RE = re.compile(r"\b(urgent|asap|critical|immediately|high priority)\b", re.IGNORECASE)
+ASSIGNEE_PATTERNS = [
+    re.compile(r"@(\w+)"),
+    re.compile(r"^([A-Z][a-z]+):"),
+    re.compile(r"\b([A-Z][a-z]+)\s+(?:will|to|should|needs to|needs)\b"),
+]
 
 
-def split_sentences(text: str):
-    text = text.strip()
-    if not text:
-        return []
-    parts = [p.strip() for p in SENTENCE_SPLIT_RE.split(text) if p.strip()]
-    return parts
+def _clean_lines(notes: str):
+    raw = [l.strip(" -•\t") for l in notes.splitlines()]
+    return [l for l in raw if l]
 
 
-def _word_freq(sentences):
-    freq = {}
-    for s in sentences:
-        for w in WORD_RE.findall(s.lower()):
-            if w in STOPWORDS or len(w) < 3:
-                continue
-            freq[w] = freq.get(w, 0) + 1
-    if freq:
-        maxf = max(freq.values())
-        for k in freq:
-            freq[k] = freq[k] / maxf
-    return freq
+def _is_action(line: str) -> bool:
+    low = line.lower()
+    return any(kw in low for kw in ACTION_KEYWORDS)
 
 
-def summarize_text(text: str, max_sentences: int = 5):
-    sentences = split_sentences(text)
-    if not sentences:
-        return []
-    freq = _word_freq(sentences)
-
-    scored = []
-    for idx, s in enumerate(sentences):
-        words = WORD_RE.findall(s.lower())
-        if not words:
-            continue
-        score = sum(freq.get(w, 0) for w in words) / len(words)
-        # small boost for earlier sentences (often set context)
-        score += (1.0 / (idx + 1)) * 0.05
-        scored.append((idx, score, s))
-
-    top = sorted(scored, key=lambda t: t[1], reverse=True)[:max_sentences]
-    top_sorted_by_position = sorted(top, key=lambda t: t[0])
-    return [s for (_, _, s) in top_sorted_by_position]
+def _find_assignee(line: str):
+    for pat in ASSIGNEE_PATTERNS:
+        m = pat.search(line)
+        if m:
+            return m.group(1)
+    return None
 
 
-def extract_action_items(text: str, max_items: int | None = None, with_details: bool = False):
-    sentences = split_sentences(text)
-    items = []
-    for s in sentences:
-        if ACTION_KEYWORDS.search(s):
-            entry = {"text": s.strip()}
-            if with_details:
-                owner = None
-                m = OWNER_RE.search(s)
-                if m:
-                    owner = m.group(1)
-                else:
-                    m2 = OWNER_NAME_RE.search(s)
-                    if m2:
-                        owner = m2.group(1)
-                deadline = None
-                dm = DEADLINE_RE.search(s)
-                if dm:
-                    deadline = dm.group(1)
-                priority = "high" if URGENT_RE.search(s) else "normal"
-                entry.update({"owner": owner, "deadline": deadline, "priority": priority})
-            items.append(entry)
-        if max_items and len(items) >= max_items:
-            break
-    return items
+def _find_due(line: str):
+    m = DATE_HINTS.search(line)
+    return m.group(1).title() if m else None
+
+
+def basic_summary(notes: str, max_lines: int = 4):
+    """Free preview: short summary, no action-item structuring."""
+    lines = _clean_lines(notes)
+    if not lines:
+        return {"summary": "No notes provided.", "preview_lines": 0}
+    preview = lines[:max_lines]
+    summary = " ".join(preview)
+    if len(summary) > 320:
+        summary = summary[:320].rsplit(" ", 1)[0] + "..."
+    return {
+        "summary": summary,
+        "total_lines": len(lines),
+        "shown_lines": len(preview),
+        "truncated": len(lines) > max_lines,
+    }
+
+
+def full_recap(notes: str):
+    """Paid feature: full summary + structured action items."""
+    lines = _clean_lines(notes)
+    if not lines:
+        return {"summary": "No notes provided.", "action_items": []}
+
+    summary_lines = lines[:12]
+    summary = " ".join(summary_lines)
+    if len(summary) > 900:
+        summary = summary[:900].rsplit(" ", 1)[0] + "..."
+
+    action_items = []
+    for line in lines:
+        if _is_action(line):
+            action_items.append({
+                "task": line,
+                "assignee": _find_assignee(line) or "Unassigned",
+                "due": _find_due(line) or "No date specified",
+            })
+
+    return {
+        "summary": summary,
+        "total_lines": len(lines),
+        "action_items": action_items,
+        "action_item_count": len(action_items),
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
