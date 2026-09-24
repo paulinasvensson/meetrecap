@@ -7,7 +7,7 @@ import httpx
 from fastapi import Header, HTTPException
 
 NDS_API_BASE = 'https://nds-command-center.onrender.com'
-VENTURE_ID = '745a7b7fbabd4c6e9465365f291ccbd0'
+VENTURE_ID = '8d3b58c8b8224710a7c9315531defbcd'
 
 
 async def require_pro(x_license_key: str = Header(default="")) -> str:
