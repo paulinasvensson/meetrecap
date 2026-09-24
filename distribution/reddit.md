@@ -1,9 +1,7 @@
-# Built an AI tool that turns my messy meeting notes into actual action items – would love feedback
+# Built an AI tool that turns my messy meeting notes into clean recaps with action items — would love feedback
 
-Hey all, I'm launching Meetrecap today and wanted to share it here first since this community gets the pain of meeting overload.
+Hey all, I'm part of a small team that just launched Meetrecap. If you run a lot of meetings (PM, consultant, remote team lead, etc.), you probably know the pain of ending up with scattered notes and then spending 30+ minutes turning them into something usable, only for action items to still fall through the cracks.
 
-The problem: I'd leave meetings with scribbled notes, half-typed thoughts, and zero structure. Then I'd waste 30+ minutes turning that mess into something my team could actually use. Multiply that across a week of meetings and it's brutal.
+Meetrecap takes your raw, unstructured notes (however messy) and converts them into a clean summary with decisions and action items assigned to owners automatically.
 
-Meetrecap takes those raw, unstructured notes and spits out a clean summary plus a clear action items list in seconds. No fancy formatting rules needed on your end, it just parses the chaos.
-
-It's brand new, so it's not perfect yet. I'd genuinely love to hear how you currently handle meeting notes, what tools you've tried, and what would make something like this actually useful for your workflow. Roast it if you need to, that's how it gets better.
+We're brand new, still very MVP, and honestly looking for real feedback from people who deal with this problem regularly. Would this replace how you currently do recaps? What would make it a no-brainer vs. just doing it manually or with a generic AI chatbot? Happy to answer anything.
