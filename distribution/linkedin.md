@@ -1,11 +1,11 @@
-Knowledge workers lose hours every week doing something that shouldn't take hours: turning meeting notes into something usable.
+Knowledge workers lose hours every week doing something that shouldn't take hours: turning meeting notes into something actionable.
 
-Inconsistent formats. Forgotten action items. That awkward Slack message asking "wait, who was supposed to do this?"
+Inconsistent note-taking leads to lost decisions, unclear ownership, and follow-ups that quietly disappear. For remote and hybrid teams especially, this adds up to real friction and real cost.
 
-The gap between a meeting ending and clarity actually existing is where teams lose momentum, and where follow-ups quietly die.
+We built Meetrecap to fix this. It takes messy, unstructured meeting notes, however you naturally capture them, and standardizes them into a clean recap: key decisions, clear action items, and owners assigned automatically.
 
-We built Meetrecap to close that gap. It takes messy, unstructured notes and converts them into clean summaries with clear action items, in seconds, not hours.
+No more reformatting notes by hand. No more "wait, who was supposed to do that?" three days later.
 
-It's built for project managers and small-to-midsize teams who run frequent meetings but don't have the bandwidth to manually structure every recap.
+We're just launching, and we're building this for project managers, consultants, and teams who run frequent meetings and need consistency without the manual overhead.
 
-We just launched, and we're looking for early users who feel this friction. If "time-to-clarity" after meetings is a problem for your team, we'd love for you to try it and tell us what's missing.
+If this is a problem you deal with, we'd love for you to try it and tell us what's missing.
