@@ -1,1 +1,1 @@
-Stop cleaning up meeting notes. Meetrecap turns messy notes and transcripts into clear summaries and action items in minutes. Try it free.
+Messy meeting notes, meet clarity. Meetrecap turns scattered notes into clean summaries and action items instantly. Try it free.
